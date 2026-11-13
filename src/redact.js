@@ -53,6 +53,69 @@ export function luhn(candidate) {
   return sum % 10 === 0
 }
 
+/** Shannon entropy in bits per character. */
+export function shannon(text) {
+  if (!text) return 0
+  const counts = new Map()
+  for (const char of text) counts.set(char, (counts.get(char) ?? 0) + 1)
+  let entropy = 0
+  for (const count of counts.values()) {
+    const p = count / text.length
+    entropy -= p * Math.log2(p)
+  }
+  return entropy
+}
+
+/** Words that, near a high-entropy token, mean "this is a credential". */
+const SECRET_KEYWORDS = /(?:key|secret|token|passw(?:or)?d|passwd|pwd|auth|credential|bearer|private|api[-_]?key|access[-_]?key)/i
+
+/**
+ * Entropy-based detection: the fallback for credentials no regex knows.
+ *
+ * Deliberately conservative — a token must be long, high-entropy AND within 64
+ * characters of a credential keyword. Entropy alone flags base64 images, minified
+ * JS and hashes, and a prompt-fatigued user clicking through false positives is a
+ * worse outcome than a missed unknown secret (which the vault still handles once
+ * registered).
+ *
+ * @param {string} text
+ * @param {object} [options]
+ * @param {number} [options.minLength] shortest candidate (default 24)
+ * @param {number} [options.minEntropy] bits/char threshold (default 4.0)
+ * @param {number} [options.window] keyword proximity window (default 64)
+ * @returns {Array<{ id, ruleId, kind, label, value, masked, fingerprint, snippet, pii }>}
+ */
+export function detectHighEntropy(text, { minLength = 24, minEntropy = 4.0, window = 64 } = {}) {
+  if (typeof text !== 'string' || text.length === 0) return []
+  const findings = []
+  const seen = new Set()
+  const re = /[A-Za-z0-9+/=_-]{24,}/g
+  let match
+  while ((match = re.exec(text)) !== null) {
+    const candidate = match[0]
+    if (candidate.length < minLength) continue
+    // Require a mix of character classes: pure lowercase words are not tokens.
+    if (!/[0-9]/.test(candidate) && !/[A-Z]/.test(candidate)) continue
+    if (shannon(candidate) < minEntropy) continue
+    const context = text.slice(Math.max(0, match.index - window), match.index)
+    if (!SECRET_KEYWORDS.test(context)) continue
+    if (seen.has(candidate)) continue
+    seen.add(candidate)
+    findings.push({
+      id: fingerprint(candidate),
+      ruleId: 'high-entropy',
+      kind: 'unknown-secret',
+      label: 'High-entropy secret',
+      pii: false,
+      masked: mask(candidate),
+      fingerprint: fingerprint(candidate),
+      value: candidate,
+      snippet: `${context.slice(-24).replace(/\s+/g, ' ')}⟦…⟧`,
+    })
+  }
+  return findings
+}
+
 /**
  * Mask a value for display: keep a short head/tail so a human can recognise
  * which secret it is without the value being usable.
@@ -143,7 +206,7 @@ function toEntries(source) {
  */
 export function detect(text, options = {}) {
   if (typeof text !== 'string' || text.length === 0) return []
-  const { source, piiLevel = 'all', patterns = PATTERNS, includeRaw = true } = options
+  const { source, piiLevel = 'all', patterns = PATTERNS, includeRaw = true, entropy = false } = options
   const managed = source ? toEntries(source).map((e) => e.value).filter(Boolean) : []
   const findings = []
   const seen = new Set()
@@ -176,6 +239,17 @@ export function detect(text, options = {}) {
       })
     }
   }
+
+  if (entropy) {
+    for (const finding of detectHighEntropy(text)) {
+      // Managed secrets stay silent; already-found shapes are not double reported.
+      if (managed.some((value) => finding.value.includes(value))) continue
+      if (seen.has(`${finding.ruleId}:${finding.value}`)) continue
+      seen.add(`${finding.ruleId}:${finding.value}`)
+      findings.push(includeRaw ? finding : { ...finding, value: undefined })
+    }
+  }
+
   return findings
 }
 

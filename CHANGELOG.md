@@ -11,6 +11,61 @@ While the major version is `0`, a **minor** bump may contain breaking changes.
 
 Nothing yet.
 
+## [0.1.1] — 2026-11-14
+
+Eight upgrades, all verified against the published `@deepseek-ai/*` type
+declarations before implementation. One is a correctness fix that made the plugin
+unusable with tools that need a real secret.
+
+### Added
+
+- **`pii_run` — local secret injection.** The gap that made redaction unusable:
+  a `{{API_KEY_1}}` argument could not be rewritten at `tools/pre-execute`
+  (arguments are already logged) and `tools/execute` may only replace the
+  signal, so `bash` executed the literal placeholder. `pii_run` substitutes
+  inside the tool body and passes values as environment variables, never in
+  `argv`. Output is scrubbed on the way back.
+- **`llm/stream` tripwire.** A frozen request that still contains a vault value
+  is refused instead of sent. Closes the retro-logged-secret path that
+  `agent/pre-step` cannot reach.
+- **Redaction cache.** Keyed by immutable message id and invalidated on vault
+  revision. Measured: **17.1 ms → 0.3 ms** per step on an 80 KB history.
+- **Entropy detection** (`entropyDetection`, opt-in). High-entropy tokens near a
+  credential keyword, for credentials no regex knows.
+- **`pii_secret edit`** — rename or change a value without rewriting the
+  placeholder that the transcript already contains.
+- **Vault rotation** (`vault.rotate(newPassphrase)`) — re-seals under a fresh
+  scrypt salt, format unchanged, old key zeroed only after the new file lands.
+- **Audit log** (`auditLog`, opt-in) — append-only JSONL of decisions with
+  fingerprints only. A broken log path never breaks redaction; a caller mistake
+  cannot smuggle a value into it.
+- **OS keyring support** (`useKeyring`) — macOS Keychain and libsecret via
+  `execFile`, falling back down the existing chain.
+- **Per-tool scopes** (`autoAllow`) — pre-authorise named secrets for named
+  tools so a repetitive loop stops prompting.
+
+### Fixed
+
+- **Scopes matched the wrong thing.** They were keyed on the classified action
+  (`terminal`) instead of the tool name (`bash`), and compared against the braced
+  placeholder, so `API_KEY_*` never matched. Both fixed; the bare stem now
+  matches too.
+- **Cyclic payloads hung the tripwire.** `flattenStrings` had no cycle guard, so
+  an object that referenced itself looped until the string budget never drained.
+- **The audit log raced teardown.** Writes were queued but not flushed, so a
+  write could land after the vault directory was removed (`ENOTEMPTY`). Disposal
+  now flushes; the log is also opt-in, so installing the plugin writes nothing.
+- **Rotation looked broken with an env passphrase.** `_ensureKey` prefers
+  `DSH_PII_SECRETS_PASSPHRASE` over an explicit provider, so rotating while the
+  env var held the old value made the next unlock fail. Behaviour unchanged and
+  now documented under Rotation.
+
+### Changed
+
+- `auditLog` defaults to `false`: a plugin install should not create files.
+- `pii_secret list` doc string now points the model at `pii_run` instead of
+  inviting it to type values into commands.
+
 ## [0.1.0] — 2026-11-13
 
 First release.

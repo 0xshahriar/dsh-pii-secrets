@@ -18,6 +18,7 @@
  */
 
 import { detect, detectDeep, redactDeep } from './redact.js'
+import { AUDIT_EVENTS } from './audit.js'
 
 /** Action classes that can expose data, used for copy and gating policy. */
 export const ACTIONS = Object.freeze({
@@ -74,13 +75,39 @@ export class ExposurePolicy {
    * @param {object} [options.config]
    * @param {(msg: string) => void} [options.logger]
    */
-  constructor({ store, adapter, config = {}, logger } = {}) {
+  constructor({ store, adapter, config = {}, logger, audit } = {}) {
     this.store = store
     this.adapter = adapter
     this.config = config
     this._log = logger
+    this._audit = audit
     /** Session-scoped approvals so a single allow covers a repetitive loop. */
     this._approved = new Map()
+    /**
+     * Redaction cache keyed by message id. Messages are immutable and carry a
+     * stable id, so a message only needs redacting once per vault revision.
+     * Without this, every agent step re-scans the whole history with 17 regexes.
+     */
+    this._cache = new Map()
+    this._cacheRevision = -1
+  }
+
+  /** Is this secret pre-authorised for this tool by the configured scopes? */
+  autoAllowed(toolName, entry) {
+    const scopes = this.config.autoAllow
+    if (!scopes || typeof scopes !== 'object') return false
+    const globs = scopes[toolName]
+    if (!Array.isArray(globs) || globs.length === 0) return false
+    const label = String(entry.label ?? '')
+    const placeholder = String(entry.placeholder ?? '')
+    // Accept `API_KEY_*` as well as `{{API_KEY_1}}`: nobody writes the braces.
+    const stem = placeholder.replace(/[{}]/g, '')
+    return globs.some(
+      (glob) =>
+        matchGlob(String(glob), label) ||
+        matchGlob(String(glob), placeholder) ||
+        matchGlob(String(glob), stem),
+    )
   }
 
   /** Split findings into managed (silent) and unknown (needs a decision). */
@@ -90,6 +117,7 @@ export class ExposurePolicy {
       unknown: detect(value, {
         source: this.store,
         piiLevel: piiLevel ?? this.config.piiLevel ?? 'all',
+        entropy: this.config.entropyDetection === true,
         includeRaw,
       }),
     }
@@ -137,7 +165,52 @@ export class ExposurePolicy {
         if (finding) this._approved.set(this._key(action, finding), true)
       }
     }
+    this._audit?.record(expose.size > 0 ? AUDIT_EVENTS.allowed : AUDIT_EVENTS.denied, {
+      action,
+      asked: pending.length,
+      exposed: expose.size,
+      findings: pending.map((f) => ({ ruleId: f.ruleId, fingerprint: f.fingerprint })),
+    })
     return { expose, reveal: Boolean(answer?.reveal) }
+  }
+
+  /**
+   * Last-line defense for history that is already frozen into a request.
+   *
+   * `agent/pre-step` can only rewrite inbox messages, so a secret logged *before*
+   * it was added to the vault stays in the derived history. That request cannot
+   * be rewritten at `llm/stream` (it is deep-frozen), so the only correct action
+   * is to refuse it loudly rather than ship the value.
+   *
+   * Uses plain `indexOf` per secret rather than the regex catalog: it runs on
+   * every model call and only needs to answer "is a vault value present".
+   *
+   * @param {{system?: string, messages?: unknown}} request
+   * @returns {{hit: boolean, needle?: string, count: number}}
+   */
+  tripwire(request) {
+    const haystack = flattenStrings(request)
+    if (!haystack) return { hit: false, count: 0 }
+    let count = 0
+    let needle
+    for (const entry of this.store.list()) {
+      const value = entry.value
+      if (!value || value.length < 8) continue
+      if (haystack.includes(value)) {
+        count += 1
+        needle ??= entry.placeholder
+      }
+    }
+    if (count > 0) {
+      this._audit?.record(AUDIT_EVENTS.tripwire, {
+        count,
+        placeholders: this.store
+          .list()
+          .filter((entry) => entry.value && entry.value.length >= 8 && haystack.includes(entry.value))
+          .map((entry) => entry.placeholder),
+      })
+    }
+    return { hit: count > 0, needle, count }
   }
 
   _key(action, finding) {
@@ -151,18 +224,48 @@ export class ExposurePolicy {
    * Unknown pattern matches are gated: if the user refuses, they are redacted
    * too (a generic placeholder), so nothing unmanaged slips out either.
    */
-  async protectOutbound(value, { action = ACTIONS.modelRequest, agent, signal, requestId } = {}) {
+  async protectOutbound(value, { action = ACTIONS.modelRequest, agent, signal, requestId, cacheKey } = {}) {
+    const revision = this.store.revision
+    if (revision !== this._cacheRevision) {
+      this._cache.clear()
+      this._cacheRevision = revision
+    }
+    if (cacheKey !== undefined) {
+      const hit = this._cache.get(cacheKey)
+      // Immutable message + unchanged vault ⇒ the projection cannot differ.
+      if (hit && hit.revision === revision) return hit.value
+    }
+    const result = await this._protectOutboundUncached(value, { action, agent, signal, requestId })
+    if (cacheKey !== undefined && !result.blocked) {
+      if (this._cache.size >= (this.config.cacheSize ?? 4096)) this._cache.clear()
+      this._cache.set(cacheKey, { revision, value: result })
+    }
+    return result
+  }
+
+  async _protectOutboundUncached(value, { action, agent, signal, requestId } = {}) {
     const { value: redacted, redactions } = redactDeep(value, this.store)
+    if (redactions.length) {
+      this._audit?.record(AUDIT_EVENTS.redacted, {
+        action,
+        count: redactions.length,
+        placeholders: redactions.map((r) => r.placeholder),
+      })
+    }
 
     if (this.config.unknownSecretPolicy === 'detect') {
       // Observe only: log fingerprints, never values.
-      for (const finding of detectDeep(value, { source: this.store })) {
+      for (const finding of detectDeep(value, { source: this.store, entropy: this.config.entropyDetection === true })) {
         this._log?.(`[pii-secrets] unknown secret observed: ${finding.ruleId} ${finding.fingerprint}`)
       }
       return { value: redacted, redactions, blocked: false }
     }
 
-    const unknown = detectDeep(value, { source: this.store, includeRaw: true })
+    const unknown = detectDeep(value, {
+      source: this.store,
+      includeRaw: true,
+      entropy: this.config.entropyDetection === true,
+    })
     if (unknown.length === 0) return { value: redacted, redactions, blocked: false }
 
     if (this.config.unknownSecretPolicy === 'block') {
@@ -173,6 +276,11 @@ export class ExposurePolicy {
     if (decision.expose.size === 0) {
       // Default-deny: replace every remaining unknown match with a placeholder.
       const { value: scrubbed } = redactUnknown(redacted, unknown)
+      this._audit?.record(AUDIT_EVENTS.withheld, {
+        action,
+        count: unknown.length,
+        findings: unknown.map((f) => ({ ruleId: f.ruleId, fingerprint: f.fingerprint, path: f.path })),
+      })
       return { value: scrubbed, redactions, blocked: false, withheld: unknown.length }
     }
     // Allowed: only the selected findings survive; the rest are still scrubbed.
@@ -240,8 +348,14 @@ export class ExposurePolicy {
           ? this.store.list()
           : []
 
-    if (managed.length > 0) {
-      const findings = managed.map((entry) => ({
+    // Configured scopes let a tool use named secrets without a prompt. Scopes
+    // name the *tool* (`bash`, `curl`), not the classified action.
+    const managedForGate = managed.filter((entry) => !this.autoAllowed(exec.name, entry))
+    if (managedForGate.length === 0) {
+      // Either no secret is involved, or every one is inside a configured scope.
+      if (managed.length > 0) return { kind: 'allow' }
+    } else {
+      const findings = managedForGate.map((entry) => ({
         id: `managed:${entry.id}`,
         ruleId: 'managed',
         kind: 'managed',
@@ -367,6 +481,37 @@ function redactUnknown(node, findings) {
 
 function blockedReason(count) {
   return `Blocked by PII Secrets Manager: ${count} value(s) match a secret pattern and the policy is "block".`
+}
+
+/** Minimal glob matcher for tool scopes: `*` only, case-insensitive. */
+export function matchGlob(pattern, value) {
+  if (pattern === '*') return true
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+  return new RegExp(`^${escaped}$`, 'i').test(value)
+}
+
+/** Flatten the string leaves of a request into one haystack for the tripwire. */
+function flattenStrings(node, budget = { left: 2_000_000 }, seen = new WeakSet()) {
+  const parts = []
+  const walk = (current) => {
+    if (budget.left <= 0) return
+    if (typeof current === 'string') {
+      parts.push(current)
+      budget.left -= current.length
+      return
+    }
+    if (!current || typeof current !== 'object') return
+    // A cyclic payload would otherwise walk forever.
+    if (seen.has(current)) return
+    seen.add(current)
+    if (Array.isArray(current)) {
+      for (const item of current) walk(item)
+      return
+    }
+    for (const child of Object.values(current)) walk(child)
+  }
+  walk(node)
+  return parts.join('\n')
 }
 
 function containsDeep(node, needle, seen = new WeakSet()) {

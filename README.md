@@ -87,7 +87,7 @@ type declarations:
 
 | Seam | Can it redact? | Why |
 | --- | --- | --- |
-| `llm/stream` | **No** | Loop-built requests "arrive deep-frozen (mutation throws) … listeners read it, never rewrite it", and its `next()` takes no argument — it returns the adapter's chunk stream, not the request. |
+| `llm/stream` | **No** (detect only) | Loop-built requests "arrive deep-frozen (mutation throws) … listeners read it, never rewrite it", and its `next()` takes no argument — it returns the adapter's chunk stream, not the request. It is used as a **tripwire**: a request that still contains a vault value is refused, never forwarded. |
 | `agent/pre-step` | **Yes** | A waterfall that may replace the messages entering a step: `PreStepDecision = { kind: 'reject' } \| { kind: 'enter', messages }`. |
 | `tools/post-execute` | **Yes** | Scrubs tool output before the model reads it. |
 
@@ -104,9 +104,11 @@ nobody "fixes" it back later.
 | `src/redact.js` | Regex pattern catalog, placeholder substitution, masking, Luhn check |
 | `src/policy.js` | `ExposurePolicy` — the single decision point for every surface |
 | `src/ui.js` | One-step prompt adapters: user-questions, inquirer, web RPC |
-| `src/index.js` | Cordis wiring: the three seams plus the agent-facing CRUD tool |
+| `src/keyring.js` | OS keyring backends (Keychain, libsecret) via `execFile` |
+| `src/audit.js` | Append-only JSONL decision log; fingerprints, never values |
+| `src/index.js` | Cordis wiring: four seams plus the `pii_secret` / `pii_run` tools |
 | `web/client.js` | Browser half: multi-select checklist, Select All, eye toggle |
-| `test/` | 77 tests across crypto, redaction, policy, wiring, DOM, regressions |
+| `test/` | 104 tests across crypto, redaction, policy, wiring, DOM, upgrades, regressions |
 
 ---
 
@@ -220,21 +222,97 @@ Every field is optional; the defaults are shown.
         redactToolResults: true            # scrub tool output before the model reads it
         keyCommand: ""                     # optional OS keyring command
         exposureTimeoutMs: 120000          # web prompt timeout, then deny
+        # ── 0.1.1 additions ──
+        useKeyring: true                   # read the passphrase from the OS keyring
+        keyringService: dsh-pii-secrets    # keyring service/entry name
+        blockUnredactedHistory: true       # refuse a request that still holds a vault value
+        allowLocalExecution: true          # offer pii_run (local secret injection)
+        entropyDetection: false            # opt-in: catch credentials no regex knows
+        auditLog: false                    # opt-in: JSONL decision log, fingerprints only
+        cacheSize: 4096                    # redaction cache entries per session
+        autoAllow: {}                      # per-tool scopes, e.g. { bash: ['DEV_*'] }
 ```
+
+### What each new option is for
+
+| Option | Default | Why you would change it |
+| --- | --- | --- |
+| `useKeyring` | `true` | Turn off if a locked OS keyring makes unlocking slow or prompts. |
+| `blockUnredactedHistory` | `true` | A secret logged *before* it was vaulted stays in the transcript; this refuses such a request rather than leaking it. Disable only if you accept that. |
+| `allowLocalExecution` | `true` | Registers `pii_run`. Set `false` if you do not want the plugin offering command execution. |
+| `entropyDetection` | `false` | Finds unknown high-entropy credentials near keywords. Costs false positives, so it is opt-in. |
+| `auditLog` | `false` | Writes `<vault>.audit.jsonl`. Fingerprints and decisions, never values. |
+| `autoAllow` | `{}` | Pre-authorise named secrets for named tools so a repetitive loop stops prompting. |
+
+### Scopes — pre-authorising a repetitive loop
+
+```yaml
+autoAllow:
+  bash: ['DEV_*']       # the bash tool may use vaulted DEV_* secrets silently
+  pii_run: ['API_KEY_*'] # pii_run may inject API_KEY_* without a prompt
+```
+
+Globs match the label, the placeholder, or the bare stem, case-insensitively.
+Anything not listed still goes through the one-step prompt, and publishing or
+uploading always asks for every item regardless of scope.
 
 ---
 
-## Agent-facing CRUD
+## Agent-facing tools
 
-The model gets a `pii_secret` tool with three actions:
+### `pii_secret` — CRUD
 
 | Action | Arguments | Returns |
 | --- | --- | --- |
 | `list` | — | Labels, placeholders, tags, timestamps. **Never values.** |
 | `add` | `label`, `value`, `tags?` | The new entry's id and placeholder |
+| `edit` | `id`, `label?`, `value?`, `tags?` | The id and the **unchanged** placeholder |
 | `remove` | `id` | The removed id, or `null` |
 
-Every operation is effective immediately — no restart, no re-read.
+Every operation is effective immediately — no restart, no re-read. `edit` never
+rewrites the placeholder, so a transcript that already contains `{{API_KEY_1}}`
+keeps resolving after a rename.
+
+### `pii_run` — using a secret without leaking it
+
+Redaction alone is not enough to *use* a secret. A tool argument containing
+`{{API_KEY_1}}` cannot be rewritten at `tools/pre-execute` (arguments are already
+logged) and `tools/execute` may only replace the signal — so a plain `bash` call
+would execute the literal placeholder.
+
+`pii_run` closes that gap by substituting **inside the tool body**, after the
+arguments are logged:
+
+```jsonc
+// The model calls this — no secret value anywhere in the request
+{ "command": "curl -H \"Authorization: Bearer $API_KEY_1\" https://api.example.com",
+  "secrets": ["{{API_KEY_1}}"] }
+```
+
+The value arrives as the environment variable `API_KEY_1`, never in `argv`
+(which `ps` exposes to other users), and the result is scrubbed on the way back
+so a command that echoes its environment cannot hand the value to the model.
+Each secret is approved by the same one-step gate unless a scope covers it.
+
+> `inline: true` splices values into the command string itself for tools that
+> cannot read environment variables. Off by default because argv is readable.
+
+---
+
+## Rotation
+
+```js
+await vault.rotate(newPassphrase) // re-seals under a fresh scrypt salt
+```
+
+The on-disk format is unchanged, so old files keep working and no migration is
+needed; the data is re-encrypted in place and the previous key is zeroed only
+after the new file lands.
+
+> **Update wherever the passphrase lives.** The unlock chain is
+> `DSH_PII_SECRETS_PASSPHRASE` → OS keyring → `keyCommand`. If you rotate while
+> an env var still holds the old passphrase, the next unlock will use the old
+> value and fail. Rotate the stored copy too.
 
 ---
 
@@ -256,6 +334,7 @@ npm test
 | `policy.test.js` | Managed/unknown classification, gating, fail-closed behaviour |
 | `plugin.test.js` | Cordis wiring, waterfall protocol, decision shapes |
 | `client.test.js` | DOM checklist, Select All, eye toggle, fail-closed cancel |
+| `upgrades.test.js` | Entropy detection, redaction cache, tripwire, scopes, rotation, audit, keyring, `pii_run` |
 | `regressions.test.js` | One named test per bug fixed during review |
 
 > **Note:** `test/schemastery-stub.js` exists only because some sandboxes cannot
@@ -307,6 +386,17 @@ Honest limits, stated plainly:
   everything).
 - **Tool bodies that open their own sockets** are gated on their arguments at
   `tools/pre-execute`, not on the bytes they later send.
+- **Your local transcript is not encrypted.** The vault protects what leaves the
+  machine. dsh writes the session log in the clear, so a secret typed into a
+  prompt is on your disk before redaction runs. `blockUnredactedHistory` stops it
+  from being *sent*, not from being *stored*.
+- **A secret vaulted late is in history.** `agent/pre-step` rewrites inbox
+  messages only; tool results already in the log are not re-scrubbed. Adding a
+  secret after it appeared in the transcript leaves it there — hence the
+  tripwire, which refuses such a request instead of sending it.
+- **`pii_run` executes locally.** A command you approve can still send data over
+  the network. The scrub stops the *value* reaching the model, not a determined
+  exfiltration by the command itself. Scope it narrowly.
 
 ---
 

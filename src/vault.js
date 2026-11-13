@@ -348,6 +348,8 @@ export class Vault {
     // Serialize writers so two hot-reload CRUDs cannot interleave.
     this._writing = this._writing.then(run, run)
     await this._writing
+    // We now own a known-good on-disk state, so rotation is safe from here.
+    this._loaded = true
     return this.store
   }
 
@@ -363,6 +365,59 @@ export class Vault {
     const removed = this.store.remove(id)
     if (removed) await this.save()
     return removed
+  }
+
+  /**
+   * Re-encrypt the vault under a new passphrase (and a fresh salt).
+   *
+   * The on-disk format does not change: rotation is a re-seal, so old files stay
+   * readable and a user can rotate at any time without a migration step. The
+   * previous key material is zeroed after the new one is safely on disk.
+   *
+   * @param {string} newPassphrase
+   * @returns {Promise<{salt: string}>} the new salt, base64 encoded
+   */
+  async rotate(newPassphrase) {
+    if (typeof newPassphrase !== 'string' || newPassphrase.length === 0) {
+      throw new VaultError('A non-empty new passphrase is required to rotate.', 'NO_PASSPHRASE')
+    }
+    if (!this._loaded) {
+      // Rotation must never act on a vault we could not read: that would
+      // re-seal an empty payload over live data.
+      throw new VaultError('Refusing to rotate a vault that was not loaded.', 'NOT_LOADED')
+    }
+
+    const nextSalt = randomBytes(16)
+    const nextKey = await deriveKey(newPassphrase.normalize('NFKC'), nextSalt, this._kdf)
+    // Serialize with any in-flight writer so the payload cannot move underneath us.
+    const run = async () => {
+      const payload = JSON.stringify({
+        entries: this.store.list().map(({ ...entry }) => entry),
+      })
+      const envelope = {
+        v: ENVELOPE_VERSION,
+        kdf: {
+          name: 'scrypt',
+          N: this._kdf.N,
+          r: this._kdf.r,
+          p: this._kdf.p,
+          salt: nextSalt.toString('base64'),
+        },
+        cipher: { name: 'aes-256-gcm', ...seal(nextKey, payload) },
+      }
+      await atomicWrite(this.path, JSON.stringify(envelope))
+    }
+    this._writing = this._writing.then(run, run)
+    await this._writing
+
+    // Only now discard the old key: until the write lands, the old one is the
+    // only way back into the file.
+    if (this._key) this._key.fill(0)
+    this._key = nextKey
+    this._salt = nextSalt
+    this._passphrase = newPassphrase
+    this._loadFailed = false
+    return { salt: nextSalt.toString('base64') }
   }
 }
 
