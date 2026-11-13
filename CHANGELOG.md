@@ -54,7 +54,12 @@ unusable with tools that need a real secret.
   an object that referenced itself looped until the string budget never drained.
 - **The audit log raced teardown.** Writes were queued but not flushed, so a
   write could land after the vault directory was removed (`ENOTEMPTY`). Disposal
-  now flushes; the log is also opt-in, so installing the plugin writes nothing.
+  is now async and drains both queues, and `vault.flush()` exposes the same
+  guarantee to any caller — an atomic write that finishes after cleanup leaves a
+  stray tmp file, not just a test failure.
+- **`auditLog` was opt-out in practice.** It was tested as `=== false`, so any
+  caller passing a partial config (before schema defaults apply) had files
+  written on its behalf. Now opt-in (`=== true`), as documented.
 - **Rotation looked broken with an env passphrase.** `_ensureKey` prefers
   `DSH_PII_SECRETS_PASSPHRASE` over an explicit provider, so rotating while the
   env var held the old value made the next unlock fail. Behaviour unchanged and

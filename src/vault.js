@@ -316,6 +316,17 @@ export class Vault {
     return this.store
   }
 
+  /**
+   * Wait for every queued write to land.
+   *
+   * Teardown must not race an atomic write: the tmp file is renamed into place,
+   * so a write that finishes after a caller has removed the directory leaves a
+   * stray file (or an `ENOTEMPTY` on cleanup). Sync `lock()` cannot express that.
+   */
+  async flush() {
+    await this._writing
+  }
+
   /** Serialize the current store to disk atomically. */
   async save() {
     const run = async () => {

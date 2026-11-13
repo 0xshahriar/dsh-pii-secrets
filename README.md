@@ -108,7 +108,7 @@ nobody "fixes" it back later.
 | `src/audit.js` | Append-only JSONL decision log; fingerprints, never values |
 | `src/index.js` | Cordis wiring: four seams plus the `pii_secret` / `pii_run` tools |
 | `web/client.js` | Browser half: multi-select checklist, Select All, eye toggle |
-| `test/` | 104 tests across crypto, redaction, policy, wiring, DOM, upgrades, regressions |
+| `test/` | 107 tests across crypto, redaction, policy, wiring, DOM, upgrades, regressions |
 
 ---
 

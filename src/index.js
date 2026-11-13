@@ -93,11 +93,13 @@ export function apply(ctx, config = {}) {
   // adapter reports itself unavailable and the chooser falls through to another
   // adapter.
   const web = new WebAdapter({ requestExposure: undefined, timeoutMs: config.exposureTimeoutMs })
+  // Opt-in: a caller passing a partial config (or a harness that has not applied
+  // schema defaults yet) must not have files written on its behalf.
   const audit = new AuditLog({
     path:
-      config.auditLog === false
-        ? undefined
-        : `${resolveVaultPath(config.vaultPath ?? 'pii-secrets.vault.json')}.audit.jsonl`,
+      config.auditLog === true
+        ? `${resolveVaultPath(config.vaultPath ?? 'pii-secrets.vault.json')}.audit.jsonl`
+        : undefined,
     logger: log,
   })
   const policy = new ExposurePolicy({
@@ -212,10 +214,12 @@ export function apply(ctx, config = {}) {
   registerRunTool(ctx, { vault, policy, ready, log, config })
 
   // ── 6. Lifecycle: restore key material on unload ────────────────────────────
-  ctx.effect(() => () => {
+  ctx.effect(() => async () => {
     if (typeof web.dispose === 'function') web.dispose()
-    // Let queued audit writes land before the key material goes away.
-    void audit.flush()
+    // Drain both queues before the key material goes away: an in-flight atomic
+    // write that lands after teardown leaves a stray tmp file behind.
+    await audit.flush()
+    await vault.flush()
     vault.lock()
   })
 

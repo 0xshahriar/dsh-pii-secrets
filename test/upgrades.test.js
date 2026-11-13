@@ -442,3 +442,44 @@ test('upgrade: pii_secret edit changes a label without rewriting the placeholder
     await rm(dir, { recursive: true, force: true })
   }
 })
+// ── 10. Opt-in audit + deterministic teardown ────────────────────────────────
+
+test('regression: the audit log stays off when a caller passes a partial config', async () => {
+  // Config defaults are applied by the harness; `apply()` can also be called
+  // directly (as the tests do). Testing `=== false` instead of `=== true` made
+  // every such call write files nobody asked for.
+  const { apply } = await import('../src/index.js')
+  const dir = await mkdtemp(join(tmpdir(), 'pii-optin-'))
+  const previousPassphrase = process.env.DSH_PII_SECRETS_PASSPHRASE
+  process.env.DSH_PII_SECRETS_PASSPHRASE = 'test-passphrase'
+  try {
+    const tools = fakeTools()
+    const ctx = { logger: () => ({ info() {} }), tools, get: () => undefined, on() {}, effect() {} }
+    apply(ctx, { vaultPath: join(dir, 'v.json') })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await tools.tools.get('pii_secret').execute({ action: 'add', label: 'A', value: OPENAI })
+    const { readdir } = await import('node:fs/promises')
+    const files = await readdir(dir)
+    assert.ok(!files.some((f) => f.endsWith('.audit.jsonl')), `unexpected audit file in ${files.join(',')}`)
+  } finally {
+    if (previousPassphrase === undefined) delete process.env.DSH_PII_SECRETS_PASSPHRASE
+    else process.env.DSH_PII_SECRETS_PASSPHRASE = previousPassphrase
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('regression: flush() waits for a queued write to land', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pii-flush-'))
+  try {
+    const path = join(dir, 'v.json')
+    const vault = new Vault({ path, passphraseProvider: async () => 'passphrase' })
+    await vault.load()
+    // Deliberately do NOT await: this is the teardown race in the wild.
+    void vault.upsert(makeEntry({ id: 'k1', label: 'A', value: OPENAI, placeholder: '{{A_1}}' }))
+    await vault.flush()
+    const raw = await readFile(path, 'utf8')
+    assert.ok(raw.includes('"v"'), 'the vault is on disk after flush')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
