@@ -1,0 +1,57 @@
+{
+  "name": "dsh-pii-secrets",
+  "version": "0.1.0",
+  "description": "PII Secrets Manager for DeepSeek Harness: encrypted local vault, placeholder redaction before every model request, and one-step exposure gates for tools, uploads and publishing.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Md. Shahriar Alam Shaon (@0xShahriar)",
+  "main": "src/index.js",
+  "files": [
+    "src/",
+    "web/",
+    "cordis.patch.yml"
+  ],
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./web/client.js",
+    "./vault": "./src/vault.js",
+    "./redact": "./src/redact.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "entry": "./web/client.js",
+      "slot": "settings.plugins.tab",
+      "title": "PII Secrets"
+    }
+  },
+  "engines": {
+    "dsh": ">=0.2.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.1.0",
+    "@deepseek-ai/dsh-llm": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-user-questions": {
+      "optional": true
+    },
+    "inquirer": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test": "node --import ./test/register.mjs --test test/*.test.js"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "secrets",
+    "pii",
+    "redaction"
+  ]
+}

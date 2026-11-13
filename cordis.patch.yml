@@ -1,0 +1,14 @@
+# Bundle layer for dsh-pii-secrets.
+# Rows reference the package by name so Node resolves the installed module.
+- insert:
+    - id: pii-secrets
+      name: dsh-pii-secrets
+      config:
+        # Where the encrypted vault lives. Relative paths resolve against $DSH_HOME.
+        vaultPath: pii-secrets.vault.json
+        # 'detect' logs unknown secrets, 'gate' pauses the action, 'block' refuses.
+        unknownSecretPolicy: gate
+        # Pause tool calls that would expose a managed secret.
+        gateTools: true
+        # Redact outbound model requests (agent/pre-step).
+        redactRequests: true

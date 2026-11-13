@@ -1,0 +1,58 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+jspm_packages/
+
+# Build / pack output
+dist/
+build/
+out/
+*.tgz
+*.tar.gz
+.pnpm-debug.log*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Runtime data — never commit a vault or a decrypted export
+*.vault.json
+vault.json
+*.vault.json.tmp
+*.tmp
+secrets*.json
+
+# Environment and passphrase files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.passphrase
+
+# Test and coverage artifacts
+coverage/
+.nyc_output/
+*.lcov
+test/tmp/
+.scratch/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# Misc
+.cache/
+.eslintcache
+.npm/
+.tmp/
