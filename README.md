@@ -7,10 +7,10 @@
 Keep secrets on your machine. Swap them for placeholders before any request
 reaches an LLM provider. Pause the actions that would leak them.
 
-[![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.1.3-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-109%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-183%20passing-brightgreen.svg)](#testing)
 [![dsh](https://img.shields.io/badge/dsh-%E2%89%A50.2.0-purple.svg)](#requirements)
 
 [Architecture](#architecture) · [Behaviour](#behaviour) · [Install](#install) ·
@@ -116,7 +116,7 @@ back into a rewrite later.
 | `src/audit.js` | Append-only JSONL decision log; fingerprints, never values |
 | `src/index.js` | Cordis wiring: four seams plus the `pii_secret` / `pii_run` tools |
 | `web/client.js` | Browser half: multi-select checklist, Select All, eye toggle |
-| `test/` | 109 tests across crypto, redaction, policy, wiring, DOM, upgrades, regressions |
+| `test/` | 183 tests across crypto, redaction, policy, wiring, DOM, upgrades, regressions |
 
 ---
 
@@ -172,9 +172,39 @@ unknownSecretPolicy: gate   # detect | gate | block
 | `gate` | One-step prompt (default) |
 | `block` | Refuse without asking |
 
-Built-in patterns cover AWS keys, GitHub/OpenAI/Anthropic/Slack/Google/Stripe
-tokens, private-key blocks, JWTs, credential URLs, password assignments, email,
-US SSN, payment cards (Luhn-validated), E.164 phone numbers and IBANs.
+### Detection catalog
+
+**50 patterns in four families.** Every rule carries an `id`, a `kind`, a display
+`label`, and — where the shape alone is not enough — a `validate` guard.
+
+| Family | Examples | Notes |
+| --- | --- | --- |
+| **Provider tokens** (26) | AWS, GitHub, GitLab, npm, PyPI, OpenAI, Anthropic, Google, Stripe, Slack, Twilio, SendGrid, Mailgun, Shopify, Telegram bot, DigitalOcean, Databricks, Hugging Face, Vercel, Supabase, Linear, Notion, Figma, Postman, Doppler, New Relic, Sentry, age | Fixed prefixes make these cheap and exact |
+| **Hardcoded credentials in source** (7) | `code-assignment` covers Python, JS/TS, Go, Ruby, PHP, Java, C#, Rust, shell, Dockerfile, YAML, TOML, INI, JSON, `.env`, HCL | Plus PHP `define()`, Ruby `ENV[...] =`, SQL `IDENTIFIED BY`, Ansible Vault, Kubernetes `Secret.data` |
+| **Key material** (3) | `-----BEGIN … PRIVATE KEY-----`, OpenSSH, PGP, age | Whole blocks, not fragments |
+| **PII** (7) | Email, US SSN, payment cards (Luhn), E.164 phone, IBAN | Suppressed wholesale by `piiLevel: none` |
+
+Plus credential URLs, JWTs, `Authorization: Bearer` headers, `.npmrc`
+`_authToken`, Docker `config.json` auth, `.netrc`, Azure `AccountKey=`, Google
+`GOCSPX-` secrets, and an **opt-in entropy detector** for credentials that match
+no shape at all (`entropyDetection`).
+
+#### Why the language rules are not noisy
+
+A bare `password = ...` regex is useless: it fires on every config lookup. The
+language grammar therefore extracts the identifier *and* the literal, then rejects:
+
+- **references** — `process.env.X`, `os.getenv(...)`, `os.environ[...]`,
+  `ENV.fetch`, `System.getenv`, `config.get(...)`, `${...}`, `{{...}}`;
+- **placeholders** — `your-key-here`, `changeme`, `********`, `<api-key>`;
+- **schema vocabulary** — `required`, `string`, `optional`, `hidden`, `null`;
+- **code, not data** — anything containing `(){}[]<>/\|=;:,` or whitespace, which
+  is how `CREDENTIAL_REFERENCE = /^(?:.../` and `passphrase: x.foo()` are skipped;
+- **self-assignment** — `this._passphraseProvider = passphraseProvider`.
+
+Two rules keep it honest: one value is reported **once** (the most specific rule
+wins the label), and `test/patterns.test.js` scans this repository's own source
+and docs and fails if the catalog fires on them.
 
 ---
 
@@ -332,8 +362,8 @@ npm test
 ```
 
 ```
-ℹ tests 109
-ℹ pass 109
+ℹ tests 183
+ℹ pass 183
 ℹ fail 0
 ```
 
@@ -343,6 +373,7 @@ npm test
 | `policy.test.js` | Managed/unknown classification, gating, fail-closed behaviour |
 | `plugin.test.js` | Cordis wiring, waterfall protocol, decision shapes |
 | `client.test.js` | DOM checklist, Select All, eye toggle, fail-closed cancel |
+| `patterns.test.js` | Every provider shape, 20 language forms, false-positive corpus, dogfood scan |
 | `upgrades.test.js` | Entropy detection, redaction cache, tripwire, scopes, rotation, audit, keyring, `pii_run` |
 | `regressions.test.js` | One named test per bug fixed during review |
 

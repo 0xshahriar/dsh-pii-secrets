@@ -11,6 +11,48 @@ While the major version is `0`, a **minor** bump may contain breaking changes.
 
 Nothing yet.
 
+## [0.1.3] — 2026-11-14
+
+Detection got much wider without getting noisier.
+
+### Added
+
+- **31 new patterns** (19 → 50). Provider shapes: GitLab, npm, PyPI, SendGrid,
+  Twilio, Mailgun, Shopify, Telegram bot, DigitalOcean, Databricks, Hugging Face,
+  Vercel, Supabase, Linear, Notion, Figma, Postman, Doppler, New Relic, Sentry,
+  Google `GOCSPX-`, Azure `AccountKey=`, age. Headers and files: `Authorization:
+  Bearer`, `.npmrc` `_authToken`, Docker `config.json` auth, `.netrc`.
+- **Language-based detection.** `code-assignment` extracts an
+  identifier-then-literal assignment across Python, JavaScript/TypeScript, Go
+  (`:=`), Ruby, PHP, Java, C#, Rust, shell, Dockerfile, YAML, TOML, INI, JSON,
+  `.env` and Terraform/HCL. Six syntax-specific rules cover PHP `define()`, Ruby
+  `ENV[...] =`, SQL `IDENTIFIED BY`, Ansible Vault and Kubernetes `Secret.data`.
+- `isRealCredentialValue()` — the guard that makes the above usable. Rejects
+  environment lookups, placeholders, schema vocabulary, code punctuation
+  (`/regex/`, `foo()`, `{…}`), whitespace and self-assignment.
+- `isNotSelfReference()` and a per-rule `accept()` hook, so a rule can inspect
+  the whole match rather than only its captured value.
+- `prefilter` on expensive rules: text without the trigger words skips the
+  grammar entirely (prose cost 20.7 ms → 8.9 ms per 80 KB).
+
+### Fixed
+
+- **`password-assignment` had no value validation**, so `password =
+  process.env.DB_PASSWORD`, `token: 'required'` and `api_key: "<your-key>"` were
+  all reported. It now shares the literal guard and sits last, as a fallback.
+- **`openai-key` shadowed `anthropic-key`**: the generic `sk-` rule came first, so
+  `sk-ant-…` was mislabelled. Reordered.
+- **Duplicate findings**: one value matched by several rules was reported
+  repeatedly. Each value is now reported once, and a specific rule takes the
+  label over a generic grammar.
+
+### Changed
+
+- `detect()` accepts `groups` (multi-alternative capture) and `accept`.
+- `test/patterns.test.js` adds 74 tests: every provider shape, 20 language forms,
+  a 20-case false-positive corpus, and a dogfood scan that fails if the catalog
+  fires on this repository's own source and docs.
+
 ## [0.1.2] — 2026-11-14
 
 **Re-release. No functional change.** This is the same tree as 0.1.1.
@@ -174,7 +216,8 @@ Recovered before the first release; each has a named regression test.
 - Fail-closed by default across every decision path.
 - Raw secret values never appear in a UI payload.
 
-[Unreleased]: https://github.com/0xShahriar/dsh-pii-secrets/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/0xShahriar/dsh-pii-secrets/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/0xShahriar/dsh-pii-secrets/releases/tag/v0.1.3
 [0.1.2]: https://github.com/0xShahriar/dsh-pii-secrets/releases/tag/v0.1.2
 [0.1.1]: https://github.com/0xShahriar/dsh-pii-secrets/releases/tag/v0.1.1
 [0.1.0]: https://github.com/0xShahriar/dsh-pii-secrets/releases/tag/v0.1.0

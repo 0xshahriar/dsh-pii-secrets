@@ -40,7 +40,8 @@ test('upgrade: entropy detection needs keyword proximity, so prose and paths are
 })
 
 test('upgrade: entropy detection is opt-in and off by default', () => {
-  const text = 'deploy credential: 9fK2mQ7xL4pR8tW1yZ6bN3vC5'
+  // No `=`/`:` operator, so the assignment grammar cannot fire: only entropy can.
+  const text = 'the deploy secret is 9fK2mQ7xL4pR8tW1yZ6bN3vC5'
   assert.equal(detect(text).length, 0)
   assert.equal(detect(text, { entropy: true }).length, 1)
 })

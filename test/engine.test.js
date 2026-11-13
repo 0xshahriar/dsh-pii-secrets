@@ -63,7 +63,7 @@ test('detect finds predefined credential patterns', () => {
     ['ghp_' + 'a'.repeat(36), 'github-token'],
     ['postgres://user:hunter2@db.example.com/app', 'connection-string'],
     ['eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.abcdefghij', 'jwt'],
-    ['password = "supersecret123"', 'password-assignment'],
+    ['password = "supersecret123"', 'code-assignment'],
     ['john.doe@example.com', 'email'],
     ['123-45-6789', 'us-ssn'],
     ['4111111111111111', 'credit-card'],

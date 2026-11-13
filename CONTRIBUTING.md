@@ -98,7 +98,18 @@ very good argument.
 
 ### Adding a secret pattern
 
-Add an entry to `PATTERNS` in `src/redact.js`:
+Add an entry to `PATTERNS` in `src/redact.js`. Every rule must be global, and
+three fields keep the catalog quiet:
+
+| Field | Use it when |
+| --- | --- |
+| `validate` | The shape alone over-matches. Reuse `isRealCredentialValue` for anything that captures an assignment value. |
+| `accept` | You need the whole match, not just the captured group (e.g. to reject `x = x`). |
+| `prefilter` | Your regex is expensive. A cheap `test()` on the trigger words skips it for unrelated text. |
+
+Add the rule's positive shape **and** a false-positive case to
+`test/patterns.test.js`; that suite also scans this repo and fails if the catalog
+fires on our own source or docs.
 
 ```js
 {

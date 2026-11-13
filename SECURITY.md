@@ -4,7 +4,8 @@
 
 | Version | Supported |
 | --- | --- |
-| 0.1.2 | ✅ Yes — recommended |
+| 0.1.3 | ✅ Yes — recommended (broadest detection) |
+| 0.1.2 | ✅ Yes |
 | 0.1.1 | ⚠️ Superseded — same code, but its tag was rewritten during release |
 | 0.1.0 | ⚠️ Upgrade recommended — no `llm/stream` tripwire |
 | < 0.1.0 | ❌ No |
