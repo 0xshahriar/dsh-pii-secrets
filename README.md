@@ -7,10 +7,10 @@
 Keep secrets on your machine. Swap them for placeholders before any request
 reaches an LLM provider. Pause the actions that would leak them.
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](#requirements)
-[![Tests](https://img.shields.io/badge/tests-77%20passing-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-109%20passing-brightgreen.svg)](#testing)
 [![dsh](https://img.shields.io/badge/dsh-%E2%89%A50.2.0-purple.svg)](#requirements)
 
 [Architecture](#architecture) · [Behaviour](#behaviour) · [Install](#install) ·
@@ -51,10 +51,16 @@ cannot recall it.
 - [Requirements](#requirements)
 - [Install](#install)
 - [Configuration](#configuration)
-- [Agent-facing CRUD](#agent-facing-crud)
+  - [What each new option is for](#what-each-new-option-is-for)
+  - [Scopes — pre-authorising a repetitive loop](#scopes--pre-authorising-a-repetitive-loop)
+- [Agent-facing tools](#agent-facing-tools)
+  - [`pii_secret` — CRUD](#pii_secret--crud)
+  - [`pii_run` — using a secret without leaking it](#pii_run--using-a-secret-without-leaking-it)
+- [Rotation](#rotation)
 - [Testing](#testing)
 - [Security model](#security-model)
 - [Known limitations](#known-limitations)
+- [Contributing](#contributing)
 - [License](#license)
 
 ---
@@ -93,8 +99,10 @@ type declarations:
 
 So the plugin redacts the earliest *mutable* copy of anything bound for a
 provider, then scrubs tool results so a secret printed by a tool never even
-reaches the model. `llm/stream` is documented read-only in `src/index.js` so
-nobody "fixes" it back later.
+reaches the model. `llm/stream` carries a **detection-only** handler: it reads the
+frozen request and refuses it if a vault value is still present, but never
+rewrites. That constraint is documented in `src/index.js` so nobody "fixes" it
+back into a rewrite later.
 
 ### Project layout
 
@@ -108,7 +116,7 @@ nobody "fixes" it back later.
 | `src/audit.js` | Append-only JSONL decision log; fingerprints, never values |
 | `src/index.js` | Cordis wiring: four seams plus the `pii_secret` / `pii_run` tools |
 | `web/client.js` | Browser half: multi-select checklist, Select All, eye toggle |
-| `test/` | 107 tests across crypto, redaction, policy, wiring, DOM, upgrades, regressions |
+| `test/` | 109 tests across crypto, redaction, policy, wiring, DOM, upgrades, regressions |
 
 ---
 
@@ -177,6 +185,7 @@ US SSN, payment cards (Luhn-validated), E.164 phone numbers and IBANs.
 | Node.js | ≥ 20 (uses `node:test`, `crypto.scrypt`) |
 | DeepSeek Harness | ≥ 0.2.0 (`engines.dsh`) |
 | `@deepseek-ai/cordis` | ~4.1.0 (peer) |
+| `@deepseek-ai/dsh-shell` | any (`ctx.shell`) — optional; only needed for `pii_run` |
 
 ---
 
@@ -323,8 +332,8 @@ npm test
 ```
 
 ```
-ℹ tests 77
-ℹ pass 77
+ℹ tests 109
+ℹ pass 109
 ℹ fail 0
 ```
 
@@ -348,7 +357,9 @@ npm test
 **What this protects against**
 
 - A managed secret reaching a hosted model provider, in a prompt or a tool result.
+- A secret logged *before* it was vaulted being sent, via the `llm/stream` tripwire.
 - A tool silently printing or shipping a secret you registered.
+- A secret value being typed onto a command line that `ps` exposes, via `pii_run`.
 - Accidental commits of PII/credentials appearing in the transcript.
 
 **How**
@@ -362,6 +373,13 @@ npm test
   "do not expose".
 - **No raw values in UI payloads** — the prompt carries masked text only; raw
   values sit behind a per-row accessor the UI calls on click.
+- **Detection-only tripwire** — the one seam that sees the final frozen request
+  can refuse it but never rewrites it, so a retro-logged secret fails loudly
+  instead of shipping.
+- **Secrets never in `argv`** — `pii_run` passes them as environment variables,
+  scrubs its own output, and refuses to run without at least one secret.
+- **Keyring over files** — the passphrase can come from the OS keyring, read with
+  `execFile` (no shell) and never written to disk by this plugin.
 
 ---
 

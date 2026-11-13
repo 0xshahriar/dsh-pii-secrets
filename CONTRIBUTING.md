@@ -46,7 +46,7 @@ small stub for `@deepseek-ai/schemastery` (see `test/schemastery-stub.js`).
 
 ```sh
 npm test                      # full suite
-node --test test/vault.test.js  # a single file, if you add one
+node --test --import ./test/register.mjs test/engine.test.js   # a single file
 ```
 
 ## Project layout
@@ -56,9 +56,14 @@ src/vault.js     encryption, KDF, atomic writes, the live SecretStore
 src/redact.js    pattern catalog, substitution, masking
 src/policy.js    the single decision point (classify -> decide -> apply)
 src/ui.js        prompt adapters (user-questions, inquirer, web RPC)
+src/audit.js     append-only JSONL decision log (fingerprints, never values)
+src/keyring.js   OS keyring backends via execFile (Keychain, libsecret)
 src/index.js     Cordis wiring; keep it thin
 web/client.js    browser checklist + eye toggle
 ```
+
+Note that `src/index.js` holds the only seam that can *refuse* a request
+(`llm/stream`). Keep it detection-only — that seam cannot rewrite anything.
 
 Rule of thumb: **policy is pure**. `src/policy.js` must not import Cordis, so it
 can be tested without a harness. Wiring belongs in `src/index.js`.

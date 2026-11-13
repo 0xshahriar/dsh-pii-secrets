@@ -483,3 +483,31 @@ test('regression: flush() waits for a queued write to land', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('regression: pii_run asks exactly once, not once per seam', async () => {
+  // Its arguments can look like a path (`workdir`, a command naming a file), so
+  // the capability gate treated it as read-capable and prompted *in addition to*
+  // pii_run's own per-secret prompt.
+  const adapter = allowAll()
+  const policy = new ExposurePolicy({ store: store(), adapter, config: {} })
+  const decision = await policy.gateToolCall({
+    name: 'pii_run',
+    arguments: { command: 'cat /etc/hosts', workdir: '/srv/app' },
+  })
+  assert.equal(decision.kind, 'allow', 'the tool gate defers to the in-tool gate')
+  assert.equal(adapter.calls.length, 0, 'no prompt at pre-execute')
+})
+
+test('regression: unscoped pii_run fails closed when no prompt can be shown', async () => {
+  const shell = fakeShell()
+  // No userQuestions service and no scope: the in-tool gate has no one to ask,
+  // so it must deny rather than assume consent.
+  const { tools, ctx } = await bootRunTool({ shell, seeds: [{ label: 'API_KEY', value: OPENAI }] })
+  try {
+    const run = tools.tools.get('pii_run')
+    await assert.rejects(() => run.execute({ command: 'echo $API_KEY_1', secrets: ['API_KEY_1'] }), /not approved/)
+    assert.equal(shell.specs.length, 0, 'nothing executes without consent')
+  } finally {
+    await ctx.cleanup()
+  }
+})

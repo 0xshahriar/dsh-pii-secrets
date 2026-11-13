@@ -296,6 +296,11 @@ export class ExposurePolicy {
    * allowed display: model requests are never a legitimate exposure channel.
    */
   async gateToolCall(exec) {
+    // `pii_run` gates each requested secret itself, inside the tool body where
+    // the values are known. Gating it here as well would ask twice, and the
+    // second prompt would name a whole vault the user never asked for.
+    if (exec.name === 'pii_run') return { kind: 'allow' }
+
     const action = classifyTool(exec.name, exec.arguments)
     // A 1–2 character secret is a substring of almost every command, so it can
     // never be used as a reliable "this call names this secret" signal. Such

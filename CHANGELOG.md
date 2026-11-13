@@ -65,6 +65,19 @@ unusable with tools that need a real secret.
   env var held the old value made the next unlock fail. Behaviour unchanged and
   now documented under Rotation.
 
+- **`pii_run` asked twice.** Its arguments can look like a path, so the
+  capability gate treated it as read-capable and prompted *in addition to* its own
+  per-secret prompt. The tool gate now defers to the in-tool gate.
+- **`pii_run` rejected the bare stem.** Commands reference `$API_KEY_1` but
+  `secrets` had to be `{{API_KEY_1}}`. Both now resolve.
+- **`@deepseek-ai/schemastery` was imported but never declared**, and two
+  `peerDependenciesMeta` entries named packages absent from `peerDependencies`
+  (which npm ignores). Both corrected; `dsh-shell` declared optional.
+- **Documentation had drifted:** version and test badges still read 0.1.0 / 77,
+  the seam table still called `llm/stream` unused, the architecture diagram
+  omitted the tripwire and `pii_run`, and SECURITY.md's invariants said redaction
+  never happens at `llm/stream` without noting the detection-only handler.
+
 ### Changed
 
 - `auditLog` defaults to `false`: a plugin install should not create files.
@@ -148,5 +161,6 @@ Recovered before the first release; each has a named regression test.
 - Fail-closed by default across every decision path.
 - Raw secret values never appear in a UI payload.
 
-[Unreleased]: https://github.com/0xShahriar/dsh-pii-secrets/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/0xShahriar/dsh-pii-secrets/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/0xShahriar/dsh-pii-secrets/releases/tag/v0.1.1
 [0.1.0]: https://github.com/0xShahriar/dsh-pii-secrets/releases/tag/v0.1.0

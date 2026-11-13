@@ -12,3 +12,16 @@
         gateTools: true
         # Redact outbound model requests (agent/pre-step).
         redactRequests: true
+        # ── 0.1.1 ──
+        # Read the passphrase from the OS keyring (macOS Keychain / libsecret).
+        useKeyring: true
+        # Refuse a request that still contains a vault value (retro-logged secrets).
+        blockUnredactedHistory: true
+        # Offer `pii_run`, which injects secrets locally after arguments are logged.
+        allowLocalExecution: true
+        # Opt-in: catch high-entropy credentials no regex knows (more false positives).
+        entropyDetection: false
+        # Opt-in: append a JSONL decision log (fingerprints only, never values).
+        auditLog: false
+        # Pre-authorise named secrets for named tools, e.g. { bash: ['DEV_*'] }.
+        autoAllow: {}

@@ -9,12 +9,16 @@
  *                       swapped for placeholders here.
  *   tools/pre-execute   waterfall — allow / deny / ask before every tool body.
  *   tools/post-execute  waterfall — scrub tool results before the model reads them.
- *   ctx.tools.register  the CRUD surface for the model (`pii_secret`), so the
- *                       agent can add/remove/list secrets without a restart.
+ *   llm/stream          waterfall — DETECTION ONLY. A frozen request that still
+ *                       holds a vault value is refused, never rewritten.
+ *   ctx.tools.register  the model-facing surface: `pii_secret` for CRUD and
+ *                       `pii_run` for local injection, both hot (no restart).
  *
  * NOTE ON llm/stream: it cannot redact. Loop-built requests arrive deep-frozen
  * ("listeners read it, never rewrite it") and its `next()` takes no argument.
- * Redaction therefore happens upstream at agent/pre-step plus post-execute.
+ * Redaction therefore happens upstream at agent/pre-step plus post-execute; the
+ * llm/stream listener exists only to fail loud on history pre-step cannot reach.
+ * Do not turn it into a rewrite — it will throw.
  *
  * @module dsh-pii-secrets
  */
@@ -354,6 +358,8 @@ function resolveSecret(store, token) {
   const entries = store.list()
   return (
     entries.find((entry) => entry.placeholder === wanted) ??
+    // The command references `$API_KEY_1`, so the bare stem must work too.
+    entries.find((entry) => envNameFor(entry.placeholder) === wanted) ??
     entries.find((entry) => entry.id === wanted) ??
     entries.find((entry) => String(entry.label).toLowerCase() === wanted.toLowerCase())
   )
