@@ -1,6 +1,6 @@
 {
   "name": "dsh-pii-secrets",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "PII Secrets Manager for DeepSeek Harness: encrypted local vault, placeholder redaction before every model request, and one-step exposure gates for tools, uploads and publishing.",
   "type": "module",
   "license": "MIT",

@@ -7,7 +7,7 @@
 Keep secrets on your machine. Swap them for placeholders before any request
 reaches an LLM provider. Pause the actions that would leak them.
 
-[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.1.2-blue.svg)](#)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](#requirements)
 [![Tests](https://img.shields.io/badge/tests-109%20passing-brightgreen.svg)](#testing)

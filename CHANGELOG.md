@@ -11,6 +11,19 @@ While the major version is `0`, a **minor** bump may contain breaking changes.
 
 Nothing yet.
 
+## [0.1.2] — 2026-11-14
+
+**Re-release. No functional change.** This is the same tree as 0.1.1.
+
+0.1.1's tag was force-moved three times while its own release was being finished,
+which makes it a mutable reference: two people cloning on different days could
+get different commits under the same version. Rather than ship that, 0.1.2
+republishes the identical code under a tag that is never rewritten.
+
+- **Prefer `0.1.2`.** If you pinned `0.1.1`, move to `0.1.2`; the contents match
+  the final `0.1.1` tree.
+- 109 tests passing.
+
 ## [0.1.1] — 2026-11-14
 
 Eight upgrades, all verified against the published `@deepseek-ai/*` type
@@ -161,6 +174,7 @@ Recovered before the first release; each has a named regression test.
 - Fail-closed by default across every decision path.
 - Raw secret values never appear in a UI payload.
 
-[Unreleased]: https://github.com/0xShahriar/dsh-pii-secrets/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/0xShahriar/dsh-pii-secrets/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/0xShahriar/dsh-pii-secrets/releases/tag/v0.1.2
 [0.1.1]: https://github.com/0xShahriar/dsh-pii-secrets/releases/tag/v0.1.1
 [0.1.0]: https://github.com/0xShahriar/dsh-pii-secrets/releases/tag/v0.1.0
